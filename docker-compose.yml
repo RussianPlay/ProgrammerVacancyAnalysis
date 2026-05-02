@@ -1,0 +1,140 @@
+
+services:
+    postgres:
+      image: postgres:17
+      container_name: postgres
+      restart: always
+      environment:
+        POSTGRES_DB: analytics_db
+        POSTGRES_USER: ${POSTGRES_USER}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      ports:
+        - "${POSTGRES_PORT}:5432"
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+        - ./postgres-init:/docker-entrypoint-initdb.d
+      networks:
+        - analytics_net
+      healthcheck:
+        test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
+        interval: 5s
+        retries: 5
+    clickhouse:
+      image: clickhouse/clickhouse-server:latest
+      container_name: clickhouse_server
+      restart: always
+      ports:
+        - "8123:8123"
+        - "9000:9000"
+      volumes:
+        - clickhouse_data:/var/lib/clickhouse
+        - ./clickhouse-logs:/var/log/clickhouse-server
+        - ./clickhouse-users.xml:/etc/clickhouse-server/users.d/default-user.xml
+      networks:
+        - analytics_net
+    superset:
+      build:
+        context: .
+        dockerfile: Dockerfile-superset
+      container_name: superset
+      restart: always
+      ports:
+        - "8088:8088"
+      volumes:
+        - ./superset:/app/superset_home
+      environment:
+        SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      networks:
+        - analytics_net
+      depends_on:
+        - clickhouse
+    airflow-init:
+      build:
+        context: .
+        dockerfile: Dockerfile
+      container_name: airflow-init
+      depends_on:
+        postgres:
+          condition: service_healthy
+      environment:
+        AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+        AIRFLOW__CORE__EXECUTOR: LocalExecutor
+        AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+        AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+        AIRFLOW_CONN_POSTGRES_DEFAULT: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/analytics_db
+        AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      command: >
+        bash -c "
+          /usr/local/bin/airflow db upgrade &&
+          /usr/local/bin/airflow users create -r Admin -u admin -p admin -e admin@mail.com -f admin -l admin || true
+        "
+      networks:
+        - analytics_net
+    airflow-webserver:
+      build: .
+      container_name: airflow-webserver
+      restart: always
+      depends_on:
+        airflow-init:
+          condition: service_completed_successfully
+      environment:
+        AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+        AIRFLOW__CORE__EXECUTOR: LocalExecutor
+        AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+        AIRFLOW_CONN_POSTGRES_DEFAULT: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/analytics_db
+        PYTHONPATH: /opt/airflow
+        AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      volumes:
+        - ./dags:/opt/airflow/dags
+        - ./logs:/opt/airflow/logs
+        - ./SQL_Requests:/opt/airflow/SQL_Requests
+        - ./DBMS_Classes:/opt/airflow/DBMS_Classes
+        - ./api:/opt/airflow/api
+        - ./data_collector:/opt/airflow/data_collector
+      ports:
+        - "8080:8080"
+      command: ["bash", "-c", "exec airflow webserver"]
+      networks:
+        - analytics_net
+    airflow-scheduler:
+      build: .
+      container_name: airflow-scheduler
+      restart: always
+      depends_on:
+        airflow-init:
+          condition: service_completed_successfully
+      environment:
+        AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+        AIRFLOW__CORE__EXECUTOR: LocalExecutor
+        AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+        AIRFLOW_CONN_POSTGRES_DEFAULT: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/analytics_db
+        PYTHONPATH: /opt/airflow
+        ACCESS_TOKEN: ${ACCESS_TOKEN}
+        AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+
+        POSTGRES_USER: ${POSTGRES_USER}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+        POSTGRES_HOST: ${POSTGRES_HOST}
+        POSTGRES_PORT: ${POSTGRES_PORT}
+        POSTGRES_DB: ${POSTGRES_DB}
+        CLICKHOUSE_HOST: ${CLICKHOUSE_HOST}
+        CLICKHOUSE_PORT: ${CLICKHOUSE_PORT}
+        CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+        CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      volumes:
+        - ./dags:/opt/airflow/dags
+        - ./logs:/opt/airflow/logs
+        - ./SQL_Requests:/opt/airflow/SQL_Requests
+        - ./DBMS_Classes:/opt/airflow/DBMS_Classes
+        - ./api:/opt/airflow/api
+        - ./data_collector:/opt/airflow/data_collector
+      command: ["bash", "-c", "exec airflow scheduler"]
+      networks:
+        - analytics_net
+networks:
+  analytics_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  clickhouse_data:

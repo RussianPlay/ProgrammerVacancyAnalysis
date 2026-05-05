@@ -10,7 +10,7 @@ class VacancyCollector:
                 "backend", "frontend", "fullstack"]
     logger = logging.getLogger(__name__)
 
-    def __init__(self, target_vacancies_per_day):
+    def __init__(self, target_vacancies_per_day=2000):
         self.target_vacancies_per_day = target_vacancies_per_day
         self.api = HeadHunterApi()
 
@@ -48,3 +48,7 @@ class VacancyCollector:
         self.logger.info(f"Окончание сбора ваканский VacancyCollector collect_vacancies(). "
                     f"Количество собранных id вакансий: {len(vacancy_ids)}. Цель: {self.target_vacancies_per_day}")
         return vacancy_ids
+
+    def get_vacancy(self, vacancy_id):
+        response = self.api.get_vacancy(vacancy_id)
+        return response

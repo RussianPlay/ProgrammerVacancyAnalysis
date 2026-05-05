@@ -18,4 +18,11 @@ class ClickHouseClient:
         return self._client
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.logger.info("Соединение с клиентом Clickhouse закрыто")
+        try:
+            if self._client:
+                self._client.close()
+                self.logger.info("Соединение с клиентом Clickhouse закрыто")
+        except Exception as e:
+            self.logger.error(f"Ошибка при закрытии клиента ClickHouse: {e}")
+        if exc_type is not None:
+            self.logger.warning(f"Конструкция WITH завершилась с ошибкой: {exc_val}")

@@ -6,7 +6,6 @@ from airflow.exceptions import AirflowException
 from airflow.models import Variable
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.decorators import task
-from api.hh_api import HeadHunterApi
 from data_collector.VacancyCollector import VacancyCollector
 import logging
 
@@ -15,7 +14,7 @@ default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
     'start_date': datetime(2026, 1, 1),
-    'retries': 1,
+    'retries': 3,
     'retry_delay': timedelta(minutes=5),
     'retry_exponential_backoff': True
 }
@@ -43,14 +42,14 @@ with DAG(
     @task(task_id='prepare_data', execution_timeout=timedelta(minutes=20))
     def prepare_data(vacancy_ids):
         logger = logging.getLogger(__name__)
-        api = HeadHunterApi()
+        collector = VacancyCollector()
         target_vacancies = []
         processed_count = 1
         for vacancy_id in vacancy_ids:
             logger.info(f"Обрабатывается {processed_count} строка")
             logger.info(f"Вакансия {vacancy_id}")
             try:
-                response = api.get_vacancy(vacancy_id)
+                response = collector.get_vacancy(vacancy_id)
                 if response is None:
                     logger.warning(f"Ошибка при получении. Пропуск вакансии {vacancy_id}")
                     continue
@@ -113,9 +112,9 @@ with DAG(
 
     prepared_data = prepare_data(vacancy_ids)
 
-    # Проверка существует ли временная таблица
-    create_temp_table = SQLExecuteQueryOperator(
-        task_id='create_temp_table',
+    # Проверка существует ли таблица
+    create_vacancies = SQLExecuteQueryOperator(
+        task_id='create_vacancies',
         sql='postgresql_query/create_query.sql',
         conn_id='postgres_default'
     )
@@ -218,4 +217,4 @@ with DAG(
 
     transfer_to_clickhouse_task = transfer_to_clickhouse()
 
-    vacancy_ids >> prepared_data >> create_temp_table >> insert_to_vacancies >> transfer_to_clickhouse_task
+    vacancy_ids >> prepared_data >> create_vacancies >> insert_to_vacancies >> transfer_to_clickhouse_task

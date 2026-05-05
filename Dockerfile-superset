@@ -2,7 +2,6 @@ FROM apache/superset:latest
 
 USER root
 
-# Устанавливаем pip в venv, если его нет, и устанавливаем пакет
 RUN /app/.venv/bin/python -m ensurepip --upgrade && \
     /app/.venv/bin/python -m pip install --no-cache-dir clickhouse-connect>=0.14.0
 
